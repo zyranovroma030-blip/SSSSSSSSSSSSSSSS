@@ -209,7 +209,11 @@ export function useSmartAlerts() {
             const batchInfo = batches.length > 1 ? ` (часть ${i + 1}/${batches.length})` : ''
             const msg = `${getAlertIcon(alert.type)} ${alert.name}${batchInfo}\nМонеты: ${symbolsText}\nУсловие: ${getTypeLabel(alert)}\nПериод: ${alert.timePeriod}`
 
-            await sendTelegramNotification(telegramChatId, msg)
+            const success = await sendTelegramNotification(telegramChatId, msg)
+            if (!success) {
+              console.error('[SmartAlerts] Failed to send notification for batch', i + 1)
+              // Продолжаем отправку других батчей даже если один не удался
+            }
           }
 
           addNotification({
@@ -353,13 +357,27 @@ export function useSmartAlerts() {
       const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       const url = isDev ? '/api/notify' : `${window.location.origin}/api/notify`
       
-      await fetch(url, {
+      console.log('[Telegram] Sending notification:', { chatId, message, url })
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegramChatId: chatId, text: message }),
       })
+      
+      const result = await response.json()
+      
+      if (!response.ok) {
+        console.error('[Telegram] API Error:', response.status, result)
+        return false
+      }
+      
+      console.log('[Telegram] Success:', result)
+      return true
+      
     } catch (error) {
-      console.error('Error sending Telegram notification:', error)
+      console.error('[Telegram] Error sending notification:', error)
+      return false
     }
   }
 

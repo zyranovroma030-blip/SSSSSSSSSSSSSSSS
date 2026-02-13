@@ -15,5 +15,11 @@
       "source": "/((?!api).*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/check-smart-alerts",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }
