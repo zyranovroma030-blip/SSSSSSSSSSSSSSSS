@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useScreenerStore, type SmartAlert } from '../store/screener'
-import { getBinanceTickers, convertBinanceToBybitFormat } from '../api/binance'
-import { getKline } from '../api/bybit'
+import { getTickersLinear, getKline } from '../api/bybit'
 import type { KlineInterval } from '../api/bybit'
 
 interface CoinData {
@@ -45,16 +44,13 @@ export function useSmartAlerts() {
     setSmartAlertsChecking(true)
 
     try {
-      // Получаем текущие данные всех монет с Binance
-      const binanceTickers = await getBinanceTickers()
-      console.log('[SmartAlerts] Got Binance tickers:', binanceTickers.length)
+      // Получаем текущие данные всех монет
+      const tickersResponse = await getTickersLinear()
+      console.log('[SmartAlerts] Got tickers:', tickersResponse.list?.length || 0)
       const currentData = new Map<string, CoinData>()
 
-      // Конвертируем данные Binance в формат Bybit
-      const bybitFormat = convertBinanceToBybitFormat(binanceTickers)
-
       // Обрабатываем тикеры
-      bybitFormat.forEach((ticker: any) => {
+      tickersResponse.list.forEach((ticker: any) => {
         const prevPrice = parseFloat(ticker.prevPrice24h) || parseFloat(ticker.lastPrice)
         const currentPrice = parseFloat(ticker.lastPrice)
         const priceChange = ((currentPrice - prevPrice) / prevPrice) * 100

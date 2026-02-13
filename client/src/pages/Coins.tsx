@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi } from 'lightweight-charts'
-import { getBinanceTickers, convertBinanceToBybitFormat } from '../api/binance'
-import { getKline, type KlineInterval } from '../api/bybit'
+import { getTickersLinear, getKline, type KlineInterval } from '../api/bybit'
 import { useScreenerStore } from '../store/screener'
 import SmartAlertButton from '../components/SmartAlertButton'
 import { useBybitTickers } from '../hooks/useBybitTickers'
@@ -60,10 +59,9 @@ export default function Coins() {
   }, [symbolFromUrl, symbolFromQuery])
 
   const loadTickers = () => {
-    getBinanceTickers().then((binanceTickers) => {
+    getTickersLinear().then((res) => {
       const map: Record<string, any> = {}
-      const bybitFormat = convertBinanceToBybitFormat(binanceTickers)
-      bybitFormat.forEach((t: any) => {
+      res.list.forEach((t: any) => {
         const prev = parseFloat(t.prevPrice24h) || parseFloat(t.lastPrice)
         const high = parseFloat(t.highPrice24h)
         const low = parseFloat(t.lowPrice24h)

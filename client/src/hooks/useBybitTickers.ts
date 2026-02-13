@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { getTickersLinear } from '../api/bybit'
-import { getBinanceTickers, convertBinanceToBybitFormat } from '../api/binance'
 import type { CoinMetric } from '../types'
 import type { TickerLinear } from '../api/bybit'
 
@@ -70,15 +69,10 @@ export function useBybitTickers(
     let cancelled = false
     setLoading(true)
     setError(null)
-    
-    // Загружаем данные с Binance
-    getBinanceTickers()
-      .then((binanceTickers) => {
+    getTickersLinear()
+      .then((res) => {
         if (cancelled) return
-        
-        // Конвертируем данные Binance в формат Bybit
-        const bybitFormat = convertBinanceToBybitFormat(binanceTickers)
-        let coins: CoinMetric[] = bybitFormat.map(toCoinMetric)
+        let coins: CoinMetric[] = res.list.map(toCoinMetric)
         const bl = new Set(blacklist.map((s) => s.toUpperCase()))
         
         // Логируем фильтрацию для отладки
