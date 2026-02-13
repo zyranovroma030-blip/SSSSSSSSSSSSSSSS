@@ -1,42 +1,44 @@
-import { useState, useEffect } from 'react'
-import { getTickersLinear, getOrderbook } from '../api/bybit'
+import { useState, useEffect, useMemo } from 'react'
+import { getTickersLinear } from '../api/bybit'
 import s from './DensityMap.module.css'
 
-type DensityLevel = { price: number; size: number; valueUsd: number; side: 'bid' | 'ask' }
-
-export type VolumeNearPriceRow = {
-  symbol: string
-  lastPrice: number
-  distancePct: number
-  volumeAtLevel: number
-  levelPrice: number
-  densityRatio: number // Соотношение плотности к общему объему 24h
-  turnover24h: number // Общий объем 24h
-  supportStrength: 'weak' | 'medium' | 'strong' // Сила поддержки/сопротивления
+interface DensityLevel {
+  price: number
+  volume: number
+  side: 'buy' | 'sell'
+  density: number
+  densityRatio: number // Соотношение плотности к общему объему
+  turnover24h: number
+  supportStrength: 'weak' | 'medium' | 'strong'
 }
 
-const MAX_DISTANCE_PCT_DEFAULT = 2
-const TOP_SYMBOLS_BY_VOLUME = 60
-const BATCH_SIZE = 4
-const MIN_DENSITY_RATIO = 0.15 // Минимальное соотношение плотности к общему объему
-
-function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
+interface DensityFilters {
+  minVolume: number
+  maxVolume: number
+  minDensity: number
+  maxDensity: number
+  minDensityRatio: number // Минимальное соотношение плотности к объему
+  maxDistance: number // Максимальное расстояние от текущей цены в %
 }
+
+const TOP_SYMBOLS_BY_VOLUME = 50
+const MIN_DENSITY_RATIO = 1.5 // Плотность должна быть в 1.5 раза выше среднего
 
 export default function DensityMap() {
-  const [symbol, setSymbol] = useState('BTCUSDT')
+  const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT')
   const [symbols, setSymbols] = useState<string[]>([])
-  const [bids, setBids] = useState<DensityLevel[]>([])
-  const [asks, setAsks] = useState<DensityLevel[]>([])
-  const [mid, setMid] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [volumeNearList, setVolumeNearList] = useState<VolumeNearPriceRow[]>([])
-  const [volumeNearLoading, setVolumeNearLoading] = useState(false)
-  const [maxDistancePct, setMaxDistancePct] = useState(MAX_DISTANCE_PCT_DEFAULT)
-  const [sortBy, setSortBy] = useState<'distance' | 'volume' | 'density' | 'price_change' | 'symbol' | 'price'>('density')
-  const [minVolumeUsd, setMinVolumeUsd] = useState(0)
+  const [densityLevels, setDensityLevels] = useState<DensityLevel[]>([])
+  const [loading, setLoading] = useState(false)
+  const [filters, setFilters] = useState<DensityFilters>({
+    minVolume: 1000000,
+    maxVolume: 0,
+    minDensity: 100000,
+    maxDensity: 0,
+    minDensityRatio: 2.0,
+    maxDistance: 2.0
+  })
 
+  // Загружаем список символов
   useEffect(() => {
     getTickersLinear().then((res) => {
       const list = res.list
@@ -47,273 +49,275 @@ export default function DensityMap() {
     })
   }, [])
 
-  useEffect(() => {
-    if (!symbol) return
+  // Загружаем данные плотности для выбранного символа
+  const fetchDensityData = async () => {
     setLoading(true)
-    Promise.all([getOrderbook(symbol, 200), getTickersLinear()])
-      .then(([ob, tickersRes]) => {
-        const ticker = tickersRes.list.find((t: any) => t.symbol === symbol)
-        const lastPrice = ticker ? parseFloat(ticker.lastPrice) : (parseFloat(ob.b[0]?.[0] || '0') + parseFloat(ob.a[0]?.[0] || '0')) / 2
-        setMid(lastPrice)
-        const toLevel = (side: 'bid' | 'ask') => (entry: [string, string]): DensityLevel => {
-          const price = parseFloat(entry[0])
-          const size = parseFloat(entry[1])
-          return { price, size, valueUsd: price * size, side }
-        }
-        setBids(ob.b.map(toLevel('bid')))
-        setAsks(ob.a.map(toLevel('ask')))
-      })
-      .finally(() => setLoading(false))
-  }, [symbol])
+    try {
+      // Получаем order book
+      const orderbookResponse = await fetch(`https://api.bybit.com/v5/market/orderbook?symbol=${selectedSymbol}&category=linear&limit=1000`)
+      const orderbook = await orderbookResponse.json()
+      
+      if (!orderbook.result || !orderbook.result.b || !orderbook.result.a) {
+        console.error('Invalid orderbook data')
+        return
+      }
 
-  const loadVolumeNearPrice = () => {
-    setVolumeNearLoading(true)
-    getTickersLinear()
-      .then((res) => {
-        const byVol = res.list
-          .filter((t: any) => t.symbol.endsWith('USDT'))
-          .sort((a: any, b: any) => parseFloat(b.turnover24h || 0) - parseFloat(a.turnover24h || 0))
-          .slice(0, TOP_SYMBOLS_BY_VOLUME)
-          .map((t: any) => t.symbol)
-        return byVol
-      })
-      .then(async (symbolList: string[]) => {
-        const tickersRes = await getTickersLinear()
-        const lastPrices: Record<string, number> = {}
-        const turnover24h: Record<string, number> = {}
-        tickersRes.list.forEach((t: any) => {
-          lastPrices[t.symbol] = parseFloat(t.lastPrice)
-          turnover24h[t.symbol] = parseFloat(t.turnover24h || '0')
-        })
-        const rows: VolumeNearPriceRow[] = []
-        
-        for (let i = 0; i < symbolList.length; i += BATCH_SIZE) {
-          const batch = symbolList.slice(i, i + BATCH_SIZE)
-          const obs = await Promise.all(batch.map((sym) => getOrderbook(sym, 100)))
-          await delay(300)
-          
-          batch.forEach((sym, j) => {
-            const ob = obs[j]
-            const lastPrice = lastPrices[sym] || 0
-            const totalVolume = turnover24h[sym] || 0
-            
-            if (!lastPrice || totalVolume < 1000000) return // Пропускаем монеты с объемом менее $1M
-            
-            const toLevel = (entry: [string, string]) => {
-              const price = parseFloat(entry[0])
-              const size = parseFloat(entry[1])
-              return { price, valueUsd: price * size }
-            }
-            const allLevels = [...(ob.b || []).map(toLevel), ...(ob.a || []).map(toLevel)]
-            
-            // Ищем уровни с высокой плотностью
-            const densityLevels = allLevels.filter(level => {
-              const distancePct = (Math.abs(level.price - lastPrice) / lastPrice) * 100
-              if (distancePct > 5) return false // Игнорируем уровни дальше 5%
-              const densityRatio = totalVolume > 0 ? level.valueUsd / totalVolume : 0
-              return densityRatio >= MIN_DENSITY_RATIO
-            })
-            
-            if (densityLevels.length === 0) return
-            
-            // Находим лучший уровень - максимальную плотность
-            const bestLevel = densityLevels.reduce((a, b) => a.valueUsd > b.valueUsd ? a : b)
-            const distancePct = (Math.abs(bestLevel.price - lastPrice) / lastPrice) * 100
-            
-            // Определяем силу поддержки/сопротивления
-            let supportStrength: 'weak' | 'medium' | 'strong' = 'weak'
-            if (bestLevel.valueUsd / totalVolume >= 0.3 && distancePct <= 1) {
-              supportStrength = 'strong'
-            } else if (bestLevel.valueUsd / totalVolume >= 0.15 && distancePct <= 2) {
-              supportStrength = 'medium'
-            }
-            
-            rows.push({
-              symbol: sym,
-              lastPrice,
-              distancePct,
-              volumeAtLevel: bestLevel.valueUsd,
-              levelPrice: bestLevel.price,
-              densityRatio: bestLevel.valueUsd / totalVolume,
-              turnover24h: totalVolume,
-              supportStrength
-            })
-          })
+      // Получаем текущие данные о объеме
+      const tickersResponse = await getTickersLinear()
+      const ticker = tickersResponse.list.find((t: any) => t.symbol === selectedSymbol)
+      const turnover24h = ticker ? parseFloat(ticker.turnover24h) : 0
+      const currentPrice = ticker ? parseFloat(ticker.lastPrice) : 0
+
+      const bids = orderbook.result.b // Buy ордера (поддержка)
+      const asks = orderbook.result.a // Sell ордера (сопротивление)
+
+      const densityData: DensityLevel[] = []
+
+      // Анализируем buy side (уровни поддержки)
+      for (let i = 0; i < Math.min(bids.length, 200); i++) {
+        const price = parseFloat(bids[i][0])
+        const volume = parseFloat(bids[i][1])
+        const distanceFromCurrent = Math.abs((price - currentPrice) / currentPrice) * 100
+
+        // Рассчитываем локальную плотность - сумма объемов в окне вокруг этого уровня
+        let localDensity = volume
+        for (let j = Math.max(0, i - 5); j < Math.min(i + 5, bids.length); j++) {
+          localDensity += parseFloat(bids[j][1])
         }
-        return rows
-      })
-      .then((rows) => {
-        setVolumeNearList(rows)
-        setVolumeNearLoading(false)
-      })
-      .catch(() => setVolumeNearLoading(false))
+
+        // Рассчитываем соотношение плотности к общему объему
+        const densityRatio = turnover24h > 0 ? localDensity / (turnover24h / 1440) : 0 // Объем в минуту
+
+        // Определяем силу поддержки
+        let supportStrength: 'weak' | 'medium' | 'strong' = 'weak'
+        if (densityRatio >= 3.0) supportStrength = 'strong'
+        else if (densityRatio >= 1.5) supportStrength = 'medium'
+
+        densityData.push({
+          price,
+          volume,
+          side: 'buy',
+          density: localDensity,
+          densityRatio,
+          turnover24h,
+          supportStrength
+        })
+      }
+
+      // Анализируем sell side (уровни сопротивления)
+      for (let i = 0; i < Math.min(asks.length, 200); i++) {
+        const price = parseFloat(asks[i][0])
+        const volume = parseFloat(asks[i][1])
+        const distanceFromCurrent = Math.abs((price - currentPrice) / currentPrice) * 100
+
+        let localDensity = volume
+        for (let j = Math.max(0, i - 5); j < Math.min(i + 5, asks.length); j++) {
+          localDensity += parseFloat(asks[j][1])
+        }
+
+        const densityRatio = turnover24h > 0 ? localDensity / (turnover24h / 1440) : 0
+
+        let supportStrength: 'weak' | 'medium' | 'strong' = 'weak'
+        if (densityRatio >= 3.0) supportStrength = 'strong'
+        else if (densityRatio >= 1.5) supportStrength = 'medium'
+
+        densityData.push({
+          price,
+          volume,
+          side: 'sell',
+          density: localDensity,
+          densityRatio,
+          turnover24h,
+          supportStrength
+        })
+      }
+
+      setDensityLevels(densityData)
+    } catch (error) {
+      console.error('Error fetching density data:', error)
+    } finally {
+      setLoading(false)
+    }
   }
+
+  // Фильтруем данные
+  const filteredData = useMemo(() => {
+    return densityLevels.filter(d => {
+      const distanceFromCurrent = d.turnover24h > 0 ? 
+        Math.abs((d.price - (densityLevels.find(dl => dl.turnover24h > 0)?.price || 0)) / d.price) * 100 : 0
+
+      return d.volume >= filters.minVolume &&
+             (filters.maxVolume === 0 || d.volume <= filters.maxVolume) &&
+             d.density >= filters.minDensity &&
+             (filters.maxDensity === 0 || d.density <= filters.maxDensity) &&
+             d.densityRatio >= filters.minDensityRatio &&
+             distanceFromCurrent <= filters.maxDistance
+    })
+  }, [densityLevels, filters])
+
+  // Сортируем данные
+  const sortedData = useMemo(() => {
+    return [...filteredData].sort((a, b) => b.density - a.density)
+  }, [filteredData])
 
   useEffect(() => {
-    loadVolumeNearPrice()
-  }, [])
+    if (selectedSymbol) {
+      fetchDensityData()
+    }
+  }, [selectedSymbol])
 
-  const filteredVolumeNear = volumeNearList
-    .filter((r) => r.distancePct <= maxDistancePct && r.volumeAtLevel >= minVolumeUsd)
-    .sort((a, b) => {
-      if (sortBy === 'distance') return a.distancePct - b.distancePct
-      if (sortBy === 'volume') return b.volumeAtLevel - a.volumeAtLevel
-      if (sortBy === 'density') return b.densityRatio - a.densityRatio
-      if (sortBy === 'price_change') return Math.abs((b.lastPrice - b.levelPrice) / b.levelPrice) - Math.abs((a.lastPrice - a.levelPrice) / a.levelPrice)
-      if (sortBy === 'symbol') return a.symbol.localeCompare(b.symbol)
-      if (sortBy === 'price') return b.lastPrice - a.lastPrice
-      return 0
-    })
+  // Автообновление каждые 30 секунд
+  useEffect(() => {
+    const interval = setInterval(fetchDensityData, 30000)
+    return () => clearInterval(interval)
+  }, [selectedSymbol])
 
-  const maxVal = Math.max(...bids.map((x) => x.valueUsd), ...asks.map((x) => x.valueUsd), 1)
-  const pct = (v: number) => (v / maxVal) * 100
-
-  function getSupportStrengthColor(strength: 'weak' | 'medium' | 'strong'): string {
-  switch (strength) {
-    case 'strong': return '#22c55e'
-    case 'medium': return '#f59e0b'
-    case 'weak': return '#ef4444'
-    default: return '#6b7280'
+  const getStrengthColor = (strength: string) => {
+    switch (strength) {
+      case 'strong': return '#22c55e'
+      case 'medium': return '#f59e0b'
+      case 'weak': return '#ef4444'
+      default: return '#6b7280'
+    }
   }
-}
 
-function getSupportStrengthText(strength: 'weak' | 'medium' | 'strong'): string {
-  switch (strength) {
-    case 'strong': return 'Сильная'
-    case 'medium': return 'Средняя'
-    case 'weak': return 'Слабая'
-    default: return 'Неизвестно'
+  const getSideIcon = (side: string) => {
+    return side === 'buy' ? '🟢' : '🔴'
   }
-}
-
-function formatVol(v: number): string {
-  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M$'
-  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K$'
-  return v.toFixed(0) + '$'
-}
 
   return (
-    <div className={s.wrap}>
-      <div className={s.toolbar}>
-        <label>Монета</label>
-        <select value={symbol} onChange={(e) => setSymbol(e.target.value)} className={s.select}>
-          {symbols.map((sym) => (
-            <option key={sym} value={sym}>{sym.replace('USDT', '')}.F</option>
-          ))}
-        </select>
-        <span className={s.hint}>Карта плотностей по стакану фьючерсов Bybit. Большие объёмы на уровнях — зоны ликвидности.</span>
-      </div>
-      {loading && <div className={s.loading}>Загрузка стакана…</div>}
-      {!loading && (
-        <div className={s.content}>
-          <div className={s.sideLabel}>Покупки (bid)</div>
-          <div className={s.obArea}>
-            <div className={s.asks}>
-              {asks.slice().reverse().slice(0, 50).map((l, i) => (
-                <div key={i} className={s.row} style={{ '--pct': pct(l.valueUsd) + '%' } as React.CSSProperties}>
-                  <span className={s.priceRed}>{l.price.toFixed(4)}</span>
-                  <span className={s.size}>{l.size.toLocaleString()}</span>
-                  <span className={s.barWrap}><span className={s.barAsk} style={{ width: pct(l.valueUsd) + '%' }} /></span>
-                </div>
-              ))}
-            </div>
-            <div className={s.midLine}>
-              <span>Цена: {mid.toFixed(4)}</span>
-            </div>
-            <div className={s.bids}>
-              {bids.slice(0, 50).map((l, i) => (
-                <div key={i} className={s.row}>
-                  <span className={s.priceGreen}>{l.price.toFixed(4)}</span>
-                  <span className={s.size}>{l.size.toLocaleString()}</span>
-                  <span className={s.barWrap}><span className={s.barBid} style={{ width: pct(l.valueUsd) + '%' }} /></span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className={s.sideLabel}>Продажи (ask)</div>
-        </div>
-      )}
-
-      <section className={s.volumeNearSection}>
-        <h3 className={s.volumeNearTitle}>Монеты с высокой плотностью у цены</h3>
-        <p className={s.volumeNearHint}>Показываются монеты с объемом 24h от $1M, у которых крупный объём в стакане находится рядом с текущей ценой. Фильтр плотности отсеивает монеты со слабыми уровнями поддержки/сопротивления.</p>
-        <div className={s.volumeNearToolbar}>
-          <label>
-            Макс. расстояние от цены (%):
-            <input
-              type="number"
-              min={0.1}
-              max={20}
-              step={0.5}
-              value={maxDistancePct}
-              onChange={(e) => setMaxDistancePct(parseFloat(e.target.value) || 4)}
-              className={s.volumeNearInput}
-            />
-          </label>
-          <label>
-            Мин. объём у уровня ($):
-            <input
-              type="number"
-              min={0}
-              value={minVolumeUsd || ''}
-              onChange={(e) => setMinVolumeUsd(parseFloat(e.target.value) || 0)}
-              placeholder="0"
-              className={s.volumeNearInput}
-            />
-          </label>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'distance' | 'volume' | 'density' | 'price_change' | 'symbol' | 'price')} className={s.select}>
-            <option value="density">По плотности (рекомендуется)</option>
-            <option value="distance">По близости к цене</option>
-            <option value="volume">По объёму у уровня</option>
-            <option value="price_change">По изменению цены (%)</option>
-            <option value="symbol">По названию монеты</option>
-            <option value="price">По цене</option>
+    <div className={s.densityMap}>
+      <div className={s.header}>
+        <h2>🎯 Карта плотностей ордеров</h2>
+        <div className={s.controls}>
+          <select 
+            value={selectedSymbol} 
+            onChange={(e) => setSelectedSymbol(e.target.value)}
+            disabled={loading}
+          >
+            {symbols.map(sym => (
+              <option key={sym} value={sym}>{sym.replace('USDT', '')}</option>
+            ))}
           </select>
-          <button className={s.refreshBtn} onClick={loadVolumeNearPrice} disabled={volumeNearLoading}>
-            {volumeNearLoading ? 'Загрузка…' : 'Обновить'}
+          <button onClick={fetchDensityData} disabled={loading}>
+            {loading ? '🔄 Загрузка...' : '🔄 Обновить'}
           </button>
         </div>
-        {volumeNearLoading && <div className={s.loading}>Загрузка списка монет…</div>}
-        {!volumeNearLoading && (
-          <div className={s.volumeNearTableWrap}>
-            <table className={s.volumeNearTable}>
-              <thead>
-                <tr>
-                  <th onClick={() => setSortBy('symbol')}>Монета ↕</th>
-                  <th onClick={() => setSortBy('price')}>Цена ↕</th>
-                  <th onClick={() => setSortBy('distance')}>Расстояние % ↕</th>
-                  <th onClick={() => setSortBy('volume')}>Объём у уровня ↕</th>
-                  <th onClick={() => setSortBy('density')}>Плотность ↕</th>
-                  <th>Сила уровня</th>
-                  <th onClick={() => setSortBy('price_change')}>Уровень ↕</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredVolumeNear.map((r) => (
-                  <tr key={r.symbol}>
-                    <td>{r.symbol.replace('USDT', '')}</td>
-                    <td>{r.lastPrice.toFixed(4)}</td>
-                    <td>{r.distancePct.toFixed(2)}%</td>
-                    <td>{formatVol(r.volumeAtLevel)}</td>
-                    <td>{(r.densityRatio * 100).toFixed(2)}%</td>
-                    <td>
-                      <span 
-                        style={{ 
-                          color: getSupportStrengthColor(r.supportStrength),
-                          fontWeight: 600
-                        }}
-                      >
-                        {getSupportStrengthText(r.supportStrength)}
-                      </span>
-                    </td>
-                    <td>{r.levelPrice.toFixed(4)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      </div>
+
+      <div className={s.filters}>
+        <h3>🔍 Фильтры высокой плотности</h3>
+        <div className={s.filterGrid}>
+          <div className={s.filterGroup}>
+            <label>Мин. объем ордера:</label>
+            <input
+              type="number"
+              value={filters.minVolume}
+              onChange={(e) => setFilters(prev => ({ ...prev, minVolume: Number(e.target.value) }))}
+              placeholder="1000000"
+            />
+            <small>Минимальный объем на уровне</small>
+          </div>
+          
+          <div className={s.filterGroup}>
+            <label>Макс. объем:</label>
+            <input
+              type="number"
+              value={filters.maxVolume}
+              onChange={(e) => setFilters(prev => ({ ...prev, maxVolume: Number(e.target.value) }))}
+              placeholder="0 = без огр."
+            />
+            <small>0 = без ограничения</small>
+          </div>
+          
+          <div className={s.filterGroup}>
+            <label>Мин. плотность:</label>
+            <input
+              type="number"
+              value={filters.minDensity}
+              onChange={(e) => setFilters(prev => ({ ...prev, minDensity: Number(e.target.value) }))}
+              placeholder="100000"
+            />
+            <small>Сумма объемов вокруг уровня</small>
+          </div>
+          
+          <div className={s.filterGroup}>
+            <label>Соотнош. плотн/объема:</label>
+            <input
+              type="number"
+              step="0.1"
+              value={filters.minDensityRatio}
+              onChange={(e) => setFilters(prev => ({ ...prev, minDensityRatio: Number(e.target.value) }))}
+              placeholder="2.0"
+            />
+            <small>Плотность / (объем/1440мин)</small>
+          </div>
+          
+          <div className={s.filterGroup}>
+            <label>Макс. расстояние от цены:</label>
+            <input
+              type="number"
+              step="0.1"
+              value={filters.maxDistance}
+              onChange={(e) => setFilters(prev => ({ ...prev, maxDistance: Number(e.target.value) }))}
+              placeholder="2.0"
+            />
+            <small>В процентах от текущей цены</small>
+          </div>
+        </div>
+      </div>
+
+      <div className={s.results}>
+        <h3>📊 Найденные уровни ({sortedData.length})</h3>
+        {loading ? (
+          <div className={s.loading}>
+            <div className={s.spinner}></div>
+            <span>Загрузка данных плотности...</span>
+          </div>
+        ) : sortedData.length === 0 ? (
+          <div className={s.noResults}>
+            <p>🔍 Уровни с высокой плотностью не найдены</p>
+            <p>Попробуйте уменьшить фильтры или выберите другую монету</p>
+          </div>
+        ) : (
+          <div className={s.densityTable}>
+            <div className={s.tableHeader}>
+              <div>Монета</div>
+              <div>Цена</div>
+              <div>Объем</div>
+              <div>Плотность</div>
+              <div>Соотношение</div>
+              <div>Сила</div>
+              <div>Сторона</div>
+            </div>
+            {sortedData.slice(0, 50).map((level, index) => (
+              <div key={index} className={s.tableRow}>
+                <div>{selectedSymbol.replace('USDT', '')}</div>
+                <div>{level.price.toFixed(4)}</div>
+                <div>{(level.volume / 1000000).toFixed(2)}M</div>
+                <div>{(level.density / 1000000).toFixed(2)}M</div>
+                <div>{level.densityRatio.toFixed(1)}x</div>
+                <div style={{ color: getStrengthColor(level.supportStrength) }}>
+                  {level.supportStrength === 'strong' ? '💪' : 
+                   level.supportStrength === 'medium' ? '👊' : '👎'}
+                </div>
+                <div>{getSideIcon(level.side)}</div>
+              </div>
+            ))}
           </div>
         )}
-      </section>
+      </div>
+
+      <div className={s.info}>
+        <h3>ℹ️ Как это работает</h3>
+        <ul>
+          <li><strong>Плотность</strong> - сумма объемов ордеров в окне вокруг уровня цены</li>
+          <li><strong>Соотношение</strong> - плотность относительно среднего объема в минуту</li>
+          <li><strong>Высокая плотность</strong> - уровень где цена может оттолкнуться или пробить</li>
+          <li><strong>Зеленые уровни</strong> - поддержка (buy ордера)</li>
+          <li><strong>Красные уровни</strong> - сопротивление (sell ордера)</li>
+        </ul>
+      </div>
     </div>
   )
 }
