@@ -8,7 +8,7 @@ interface SmartAlertButtonProps {
 }
 
 export default function SmartAlertButton({ symbol, className }: SmartAlertButtonProps) {
-  const { smartAlerts, addSmartAlert, removeSmartAlert } = useScreenerStore()
+  const { smartAlerts, addSmartAlert } = useScreenerStore()
   const [showModal, setShowModal] = useState(false)
   const [selectedAlert, setSelectedAlert] = useState<SmartAlert | null>(null)
 

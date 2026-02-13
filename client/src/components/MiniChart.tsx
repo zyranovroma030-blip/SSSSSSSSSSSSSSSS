@@ -20,7 +20,7 @@ interface MiniChartProps {
 }
 
 export default function MiniChart({ symbol, timeframe, candleCount = 50, onExpand, volume24h, change24hPct, volatility24hPct, className }: MiniChartProps) {
-  const { addFavoriteCoin, removeFavoriteCoin, isFavoriteCoin } = useScreenerStore()
+  const { smartAlerts, addSmartAlert, addFavoriteCoin, removeFavoriteCoin, isFavoriteCoin } = useScreenerStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -40,8 +40,7 @@ export default function MiniChart({ symbol, timeframe, candleCount = 50, onExpan
       height: 180,
       rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.1, bottom: 0.2 } },
       timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
-      crosshair: { vertLine: { visible: false }, horzLine: { visible: false } },
-      overlay: false
+      crosshair: { vertLine: { visible: false }, horzLine: { visible: false } }
     })
     
     const candlestickSeries = chart.addCandlestickSeries({
