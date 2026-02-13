@@ -1,9 +1,9 @@
-// In dev, call backend directly to avoid proxy issues; in prod use relative path
+// In dev, call backend directly to avoid proxy issues; in prod use direct Bybit API
 const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-const BASE = isDev ? 'http://localhost:4001/api/bybit/v5' : '/api/bybit/v5'
+const BASE = isDev ? 'http://localhost:4001/api/bybit/v5' : 'https://api.bybit.com/v5'
 
 async function bybit<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(BASE + path, window.location.origin)
+  const url = isDev ? new URL(BASE + path, window.location.origin) : new URL(BASE + path)
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
   const r = await fetch(url.toString())
   if (!r.ok) throw new Error(await r.text())
@@ -15,7 +15,7 @@ async function bybit<T>(path: string, params?: Record<string, string>): Promise<
 async function bybitWithRetry<T>(path: string, params?: Record<string, string>, retries = 3): Promise<T> {
   for (let i = 0; i < retries; i++) {
     try {
-      const url = new URL(BASE + path, window.location.origin)
+      const url = isDev ? new URL(BASE + path, window.location.origin) : new URL(BASE + path)
       if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
       
       const r = await fetch(url.toString(), {
