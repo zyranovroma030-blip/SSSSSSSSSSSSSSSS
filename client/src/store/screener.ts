@@ -146,6 +146,17 @@ type ScreenerStore = {
   smartAlertsCheckLogs: AlertCheckLog[]
   addSmartAlertsCheckLog: (log: AlertCheckLog) => void
   clearSmartAlertsCheckLogs: () => void
+
+  // Фильтры монет на странице Coins
+  coinFilters: {
+    volumeMin: number
+    volumeMax: number
+    priceChangeMin: number
+    priceChangeMax: number
+    volatilityMin: number
+    volatilityMax: number
+  }
+  saveCoinFilters: (filters: any) => void
 }
 
 export const useScreenerStore = create<ScreenerStore>()(
@@ -280,6 +291,20 @@ export const useScreenerStore = create<ScreenerStore>()(
         const state = useScreenerStore.getState()
         return state.favoriteCoins.some((c: FavoriteCoin) => c.symbol === symbol)
       },
+
+      // Фильтры монет на странице Coins
+      coinFilters: {
+        volumeMin: 0,
+        volumeMax: 0,
+        priceChangeMin: -100,
+        priceChangeMax: 100,
+        volatilityMin: 0,
+        volatilityMax: 100
+      },
+      saveCoinFilters: (filters) =>
+        set((s) => ({
+          coinFilters: { ...s.coinFilters, ...filters }
+        })),
     }),
     {
       name: 'bybit-screener-store',
@@ -291,12 +316,11 @@ export const useScreenerStore = create<ScreenerStore>()(
         layoutColumns: s.layoutColumns,
         soundEnabled: s.soundEnabled,
         telegramChatId: s.telegramChatId,
-        smartAlertsSettings: s.smartAlertsSettings,
-        smartAlertsChecking: s.smartAlertsChecking,
-        smartAlertsCheckLogs: s.smartAlertsCheckLogs,
+        favoriteCoins: s.favoriteCoins,
         priceAlerts: s.priceAlerts,
         smartAlerts: s.smartAlerts,
-        favoriteCoins: s.favoriteCoins,
+        smartAlertsSettings: s.smartAlertsSettings,
+        coinFilters: s.coinFilters,
       }),
     }
   )

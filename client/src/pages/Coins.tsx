@@ -5,6 +5,7 @@ import { getTickersLinear, getKline, type KlineInterval } from '../api/bybit'
 import { useScreenerStore } from '../store/screener'
 import SmartAlertButton from '../components/SmartAlertButton'
 import { useBybitTickers } from '../hooks/useBybitTickers'
+import { CoinFilters } from '../components/CoinFilters'
 import type { TimeframeKey } from '../types'
 import s from './Coins.module.css'
 
@@ -48,6 +49,9 @@ export default function Coins() {
   const [loading, setLoading] = useState(true)
   const [addAlertMode, setAddAlertMode] = useState(false)
   const [_localAlerts, _setLocalAlerts] = useState<any[]>([])
+  const [coinFilters, setCoinFilters] = useState<any>({})
+  const [searchTerm, setSearchTerm] = useState('')
+  const [sortBy, setSortBy] = useState<'favorites' | 'volume' | 'price_change'>('volume')
   const chartRef = useRef<HTMLDivElement>(null)
   const chartApiRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -422,8 +426,29 @@ const loadKline = () => {
     fetchTrades()
   }, [symbol])
   const timeframes: TimeframeKey[] = ['1m', '5m', '15m', '1h', '4h', '1d']
-  const [sortBy, setSortBy] = useState<'volume' | 'price_change' | 'favorites'>('volume')
-  const coinsList = Object.keys(tickers).sort((a, b) => {
+  
+  // Фильтрация и поиск монет
+  const filteredCoins = Object.keys(tickers).filter(symbol => {
+    const ticker = tickers[symbol]
+    if (!ticker) return false
+    
+    // Поиск по названию
+    if (searchTerm && !symbol.toLowerCase().includes(searchTerm.toLowerCase())) {
+      return false
+    }
+    
+    // Фильтры
+    if (coinFilters.volumeMin && ticker.volume24hUsd < coinFilters.volumeMin) return false
+    if (coinFilters.volumeMax && ticker.volume24hUsd > coinFilters.volumeMax) return false
+    if (ticker.priceChange24hPct < coinFilters.priceChangeMin) return false
+    if (ticker.priceChange24hPct > coinFilters.priceChangeMax) return false
+    if (ticker.volatility24hPct < coinFilters.volatilityMin) return false
+    if (ticker.volatility24hPct > coinFilters.volatilityMax) return false
+    
+    return true
+  })
+  
+  const coinsList = filteredCoins.sort((a, b) => {
     if (sortBy === 'favorites') {
       const aFav = isFavoriteCoin(a)
       const bFav = isFavoriteCoin(b)
@@ -506,6 +531,16 @@ const loadKline = () => {
       </div>
       <aside className={s.sidebar}>
         <div className={s.tableHeader}>Монеты</div>
+        <CoinFilters 
+          onFiltersChange={setCoinFilters}
+          onSearchChange={setSearchTerm}
+          coins={Object.values(tickers).map(t => ({
+            symbol: t.symbol,
+            volume24hUsd: t.volume24hUsd || 0,
+            volatility24hPct: t.volatility24hPct || 0,
+            priceChange24hPct: t.priceChange24hPct || 0
+          }))}
+        />
         <div className={s.sortButtons}>
           <button 
             className={sortBy === 'favorites' ? s.sortActive : s.sortBtn}
