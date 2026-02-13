@@ -1,11 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { createChart, IChartApi, ISeriesApi } from 'lightweight-charts'
-import { getTickersLinear, getKline, TIMEFRAME_INTERVALS } from '../api/bybit'
-import type { KlineInterval } from '../api/bybit'
+import { getBinanceTickers, convertBinanceToBybitFormat } from '../api/binance'
+import { getKline, type KlineInterval } from '../api/bybit'
 import { useScreenerStore } from '../store/screener'
+import SmartAlertButton from '../components/SmartAlertButton'
+import { useBybitTickers } from '../hooks/useBybitTickers'
 import type { TimeframeKey } from '../types'
 import s from './Coins.module.css'
+
+const TIMEFRAME_INTERVALS: Record<TimeframeKey, KlineInterval> = {
+  '1m': '1',
+  '5m': '5',
+  '15m': '15',
+  '1h': '60',
+  '4h': '240',
+  '1d': 'D'
+}
 
 function notifyTelegram(telegramChatId: string, text: string) {
   fetch('/api/notify', {
@@ -49,9 +60,10 @@ export default function Coins() {
   }, [symbolFromUrl, symbolFromQuery])
 
   const loadTickers = () => {
-    getTickersLinear().then((res) => {
+    getBinanceTickers().then((binanceTickers) => {
       const map: Record<string, any> = {}
-      res.list.forEach((t: any) => {
+      const bybitFormat = convertBinanceToBybitFormat(binanceTickers)
+      bybitFormat.forEach((t: any) => {
         const prev = parseFloat(t.prevPrice24h) || parseFloat(t.lastPrice)
         const high = parseFloat(t.highPrice24h)
         const low = parseFloat(t.lowPrice24h)
