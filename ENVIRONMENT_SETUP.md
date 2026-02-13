@@ -28,14 +28,14 @@ Add these in your Vercel project dashboard: Project → Settings → Environment
 After deployment, test the Telegram notifications:
 1. Set up your Telegram Chat ID in the app
 2. Create a smart alert with low threshold
-3. Wait for the next check (every 5 minutes via cron job)
+3. Wait for the next check (every 1 minute via cron job)
 
 ## Cron Job Schedule
 
-The smart alerts are checked automatically every 5 minutes via Vercel cron job:
-- Schedule: `*/5 * * * *` (every 5 minutes)
+The smart alerts are checked automatically every 1 minute via Vercel cron job:
+- Schedule: `* * * * *` (every minute)
 - Endpoint: `/api/check-smart-alerts`
-- Works 24/7 even when the site is closed
+- Works 24/7 even when site is closed
 
 ## Troubleshooting
 

@@ -19,7 +19,7 @@
   "crons": [
     {
       "path": "/api/check-smart-alerts",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     }
   ]
 }
