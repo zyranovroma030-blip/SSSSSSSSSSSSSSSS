@@ -16,7 +16,7 @@ function notifyTelegram(telegramChatId: string, text: string) {
 }
 
 // Глобальный кэш для хранения данных графиков
-const chartDataCache = new Map<string, any[]>()
+const _chartDataCache = new Map<string, any[]>()
 
 export default function Coins() {
   const { symbol: symbolFromUrl } = useParams<{ symbol: string }>()
@@ -40,7 +40,7 @@ export default function Coins() {
   const [tickers, setTickers] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(true)
   const [addAlertMode, setAddAlertMode] = useState(false)
-  const [localAlerts, setLocalAlerts] = useState<any[]>([])
+  const [_localAlerts, _setLocalAlerts] = useState<any[]>([])
   const chartRef = useRef<HTMLDivElement>(null)
   const chartApiRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
